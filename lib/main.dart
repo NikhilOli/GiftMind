@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/gift_details_screen.dart';
+import 'screens/preferences_screen.dart';
+import 'screens/recommendations_screen.dart';
 
-void main() {
+Future<void> main() async {
   runApp(const GiftMindApp());
 }
 
@@ -28,6 +30,8 @@ class GiftMindApp extends StatelessWidget {
       routes: {
         WelcomeScreen.routeName: (_) => const WelcomeScreen(),
         GiftDetailsScreen.routeName: (_) => const GiftDetailsScreen(),
+        PreferencesScreen.routeName: (_) => const PreferencesScreen(),
+        RecommendationsScreen.routeName: (_) => const RecommendationsScreen(),
       },
     );
   }

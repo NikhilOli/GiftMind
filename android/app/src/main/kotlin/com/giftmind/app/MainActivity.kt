@@ -1,4 +1,4 @@
-package com.example.giftmind_app
+package com.giftmind.app
 
 import io.flutter.embedding.android.FlutterActivity
 
