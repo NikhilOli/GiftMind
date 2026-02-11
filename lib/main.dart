@@ -1,3 +1,4 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/gift_details_screen.dart';
@@ -5,6 +6,8 @@ import 'screens/preferences_screen.dart';
 import 'screens/recommendations_screen.dart';
 
 Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   runApp(const GiftMindApp());
 }
 
