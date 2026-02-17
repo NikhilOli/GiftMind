@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 
 class RecommendationApi {
   static const String url =
-      'https://us-central1-giftmind-app-3b181.cloudfunctions.net/recommend';
+    'https://recommend-w27ber2wpa-uc.a.run.app';
 
   Future<List<Map<String, dynamic>>> recommend({
     required String occasion,

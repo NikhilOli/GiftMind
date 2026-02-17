@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/user_input.dart';
 import '../services/recommendation_api.dart';
 import '../services/gift_firestore_service.dart';
+import '../services/gift_image_api.dart';
 
 class RecommendationsScreen extends StatefulWidget {
   static const routeName = '/recommendations';
@@ -15,6 +16,7 @@ class RecommendationsScreen extends StatefulWidget {
 class _RecommendationsScreenState extends State<RecommendationsScreen> {
   final _api = RecommendationApi();
   final _fs = GiftFirestoreService();
+  final _imgApi = GiftImageApi();
 
   late UserInput input;
 
@@ -22,10 +24,9 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
   String? errorMsg;
 
   List<Map<String, dynamic>> apiRanks = []; // [{id,name,score}, ...]
-  List<Map<String, dynamic>> gifts = [];    // Firestore gift docs in same order
+  List<Map<String, dynamic>> gifts = []; // Firestore gift docs in same order
 
-    bool _loadedOnce = false;
-
+  bool _loadedOnce = false;
 
   @override
   void didChangeDependencies() {
@@ -33,8 +34,7 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
 
     if (_loadedOnce) return;
     _loadedOnce = true;
-    
-    // Read route args once
+
     input = ModalRoute.of(context)!.settings.arguments as UserInput;
     _loadRecommendations();
   }
@@ -46,7 +46,7 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         errorMsg = null;
       });
 
-      // 1) Call server-side Cloud Function
+      // 1) Call server-side recommendation API
       final ranks = await _api.recommend(
         occasion: input.occasion,
         relationship: input.relationship,
@@ -58,7 +58,7 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
 
       final ids = ranks.map((r) => (r['id'] ?? '').toString()).toList();
 
-      // 2) Fetch those gifts from Firestore (preserves ranking order)
+      // 2) Fetch gift docs from Firestore by docId (same as giftId)
       final fetched = await _fs.getGiftsByIds(ids);
 
       setState(() {
@@ -93,7 +93,7 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
       );
     }
 
-    // Create quick lookup for scores by gift id
+    // Lookup score by gift id
     final scoreById = <String, dynamic>{};
     for (final r in apiRanks) {
       final id = (r['id'] ?? '').toString();
@@ -110,8 +110,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 8),
-
-        // Display Firestore gift docs in the ranked order
         ...gifts.map((g) {
           final id = (g['id'] ?? '').toString();
           final score = scoreById[id];
@@ -128,7 +126,8 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Selected Inputs', style: TextStyle(fontWeight: FontWeight.w800)),
+            const Text('Selected Inputs',
+                style: TextStyle(fontWeight: FontWeight.w800)),
             const SizedBox(height: 6),
             Text('Relationship: ${input.relationship}'),
             Text('Occasion: ${input.occasion}'),
@@ -142,6 +141,7 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
   }
 
   Widget _giftCardFromFirestore(Map<String, dynamic> g, dynamic score) {
+    final id = (g['id'] ?? '').toString();
     final name = (g['name'] ?? g['title'] ?? 'Unknown').toString();
     final desc = (g['description'] ?? '').toString();
     final minB = g['minBudget'];
@@ -155,20 +155,63 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            // ✅ IMAGE (fetched from Unsplash via Cloud Function + cached in Firestore)
+            FutureBuilder<String?>(
+              future: _imgApi.getImageUrl(giftId: id, query: name),
+              builder: (context, snap) {
+                if (snap.connectionState != ConnectionState.done) {
+                  return ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      height: 140,
+                      width: double.infinity,
+                      color: Colors.black12,
+                      alignment: Alignment.center,
+                      child: const CircularProgressIndicator(),
+                    ),
+                  );
+                }
+
+                final url = snap.data;
+                if (url == null) {
+                  return ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      height: 140,
+                      width: double.infinity,
+                      color: Colors.black12,
+                      alignment: Alignment.center,
+                      child: const Icon(Icons.card_giftcard, size: 52),
+                    ),
+                  );
+                }
+
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    url,
+                    height: 140,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                  ),
+                );
+              },
+            ),
+
+            const SizedBox(height: 10),
+
+            Text(
+              name,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+            ),
             const SizedBox(height: 4),
             if (desc.isNotEmpty) Text(desc),
             const SizedBox(height: 8),
             Text('Budget: NPR $minB–$maxB  •  Style: $style'),
             const SizedBox(height: 6),
             Text(
-              'Score (API): ${score ?? "-"}',
+              'Score (API): ${score == null ? "-" : (score as num).toStringAsFixed(3)}',
               style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Why: computed server-side using hybrid context + content-based scoring.',
-              style: TextStyle(color: Colors.black54),
             ),
           ],
         ),

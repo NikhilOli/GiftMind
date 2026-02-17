@@ -2,6 +2,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { setGlobalOptions } from "firebase-functions/v2";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
+import { defineSecret } from "firebase-functions/params";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -122,3 +123,96 @@ export const recommend = onRequest(async (req, res) => {
     res.status(500).json({ error: String(e?.message ?? e) });
   }
 });
+
+const UNSPLASH_ACCESS_KEY = defineSecret("UNSPLASH_ACCESS_KEY");
+
+export const getGiftImage = onRequest(
+  { secrets: [UNSPLASH_ACCESS_KEY] },
+  async (req, res) => {
+    try {
+      // CORS for mobile/web testing
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
+      if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+      }
+
+      if (req.method !== "POST") {
+        res.status(405).json({ error: "Use POST" });
+        return;
+      }
+
+      const giftId = String(req.body?.giftId ?? "").trim();
+      const query = String(req.body?.query ?? "").trim();
+
+      if (!giftId || !query) {
+        res.status(400).json({ error: "Missing giftId/query" });
+        return;
+      }
+
+      // 1) Check cache in Firestore
+      const ref = db.collection("gifts").doc(giftId);
+      const snap = await ref.get();
+      if (snap.exists) {
+        const data = snap.data() || {};
+        const cached = String((data as any).imageUrl ?? "").trim();
+        if (cached) {
+          res.json({ giftId, imageUrl: cached, cached: true });
+          return;
+        }
+      }
+
+      // 2) Call Unsplash Search API
+      const key = UNSPLASH_ACCESS_KEY.value();
+      if (!key) {
+        res.status(500).json({ error: "Missing UNSPLASH_ACCESS_KEY secret" });
+        return;
+      }
+
+      const apiUrl =
+        "https://api.unsplash.com/search/photos" +
+        `?query=${encodeURIComponent(query)}` +
+        "&per_page=1&orientation=squarish";
+
+      const uresp = await fetch(apiUrl, {
+        headers: {
+          Authorization: `Client-ID ${key}`,
+          "Accept-Version": "v1",
+        },
+      });
+
+      if (!uresp.ok) {
+        const t = await uresp.text();
+        logger.error("Unsplash error", { status: uresp.status, body: t });
+        res.status(502).json({ error: "Unsplash fetch failed", status: uresp.status });
+        return;
+      }
+
+      const json: any = await uresp.json();
+      const first = json?.results?.[0];
+      const imageUrl = String(first?.urls?.regular ?? "").trim();
+
+      if (!imageUrl) {
+        res.json({ giftId, imageUrl: "", cached: false, message: "No image found" });
+        return;
+      }
+
+      // 3) Save imageUrl into Firestore (cache)
+      await ref.set(
+        {
+          imageUrl,
+          imageSource: "unsplash",
+          imageQuery: query,
+          imageUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      res.json({ giftId, imageUrl, cached: false });
+    } catch (e: any) {
+      logger.error("getGiftImage error", e);
+      res.status(500).json({ error: String(e?.message ?? e) });
+    }
+  }
+);
