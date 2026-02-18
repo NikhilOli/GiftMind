@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'gift_details_screen.dart';
+import '../services/auth_service.dart';
 
 class WelcomeScreen extends StatelessWidget {
-  static const routeName = '/';
+  static const routeName = '/welcome';
 
   const WelcomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final auth = AuthService();
+
     return Scaffold(
       body: SafeArea(
         child: Padding(
@@ -16,13 +19,24 @@ class WelcomeScreen extends StatelessWidget {
             children: [
               const SizedBox(height: 18),
 
-              // Small top title (optional, like your wireframe)
-              const Align(
-                alignment: Alignment.topCenter,
-                child: Text(
-                  'GiftMind',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
+              // Top row with title + logout
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'GiftMind',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.logout),
+                    onPressed: () async {
+                      await auth.signOut();
+                    },
+                  ),
+                ],
               ),
 
               // Big center content
@@ -33,13 +47,19 @@ class WelcomeScreen extends StatelessWidget {
                     Text(
                       'GiftMind',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 44, fontWeight: FontWeight.w800),
+                      style: TextStyle(
+                        fontSize: 44,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                     SizedBox(height: 16),
                     Text(
                       'A smart system for personalized\ngift recommendations',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 18, height: 1.35),
+                      style: TextStyle(
+                        fontSize: 18,
+                        height: 1.35,
+                      ),
                     ),
                   ],
                 ),
@@ -51,7 +71,8 @@ class WelcomeScreen extends StatelessWidget {
                 height: 54,
                 child: OutlinedButton(
                   onPressed: () {
-                    Navigator.pushNamed(context, GiftDetailsScreen.routeName);
+                    Navigator.pushNamed(
+                        context, GiftDetailsScreen.routeName);
                   },
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(width: 2, color: Colors.black),
@@ -73,11 +94,13 @@ class WelcomeScreen extends StatelessWidget {
 
               const SizedBox(height: 18),
 
-              // Optional bottom note (you can remove if you want)
               const Text(
-                'UNIVERSITY PROJECT WIREFRAME - LOW FIDELITY',
+                'UNIVERSITY PROJECT - AI GIFT RECOMMENDATION SYSTEM',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: Colors.black54),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.black54,
+                ),
               ),
 
               const SizedBox(height: 18),

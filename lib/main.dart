@@ -1,9 +1,14 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'screens/profile_setup_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/gift_details_screen.dart';
 import 'screens/preferences_screen.dart';
 import 'screens/recommendations_screen.dart';
+import 'screens/auth_gate.dart';
+import 'screens/login_screen.dart';
+import 'screens/signup_screen.dart';
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,25 +22,34 @@ class GiftMindApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'GiftMind',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        scaffoldBackgroundColor: Colors.white,
-        textTheme: const TextTheme(
-          headlineLarge: TextStyle(fontSize: 36, fontWeight: FontWeight.w800),
-          headlineSmall: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-          bodyLarge: TextStyle(fontSize: 16),
-        ),
-      ),
-      initialRoute: WelcomeScreen.routeName,
-      routes: {
-        WelcomeScreen.routeName: (_) => const WelcomeScreen(),
-        GiftDetailsScreen.routeName: (_) => const GiftDetailsScreen(),
-        PreferencesScreen.routeName: (_) => const PreferencesScreen(),
-        RecommendationsScreen.routeName: (_) => const RecommendationsScreen(),
-      },
-    );
+  title: 'GiftMind',
+  debugShowCheckedModeBanner: false,
+  theme: ThemeData(
+    useMaterial3: true,
+    colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+    scaffoldBackgroundColor: Colors.white,
+    textTheme: const TextTheme(
+      headlineLarge: TextStyle(fontSize: 36, fontWeight: FontWeight.w800),
+      headlineSmall: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+      bodyLarge: TextStyle(fontSize: 16),
+    ),
+  ),
+
+  // ✅ AuthGate is now the root route
+  initialRoute: AuthGate.routeName,
+
+  routes: {
+    AuthGate.routeName: (_) => const AuthGate(),
+
+    LoginScreen.routeName: (_) => const LoginScreen(),
+    SignupScreen.routeName: (_) => const SignupScreen(),
+    ProfileSetupScreen.routeName: (_) => const ProfileSetupScreen(),
+
+    WelcomeScreen.routeName: (_) => const WelcomeScreen(),
+    GiftDetailsScreen.routeName: (_) => const GiftDetailsScreen(),
+    PreferencesScreen.routeName: (_) => const PreferencesScreen(),
+    RecommendationsScreen.routeName: (_) => const RecommendationsScreen(),
+  },
+);
   }
 }
