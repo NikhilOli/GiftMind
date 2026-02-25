@@ -9,117 +9,208 @@ const db = admin.firestore();
 
 setGlobalOptions({ maxInstances: 10 });
 
-type RecommendRequest = {
-  occasion: string;
-  relationship: string;
-  budgetNpr: number;
-  interests?: string[];
-  giftStyle?: string;
-  limit?: number;
-};
-
-function normalizeList(x: any): string[] {
-  if (!Array.isArray(x)) return [];
-  return x.map(v => String(v).toLowerCase().trim()).filter(Boolean);
-}
-
-function jaccard(a: string[], b: string[]): number {
-  const A = new Set(a);
-  const B = new Set(b);
-  if (A.size === 0 && B.size === 0) return 0;
-  let inter = 0;
-  for (const v of A) if (B.has(v)) inter++;
-  const union = A.size + B.size - inter;
-  return union === 0 ? 0 : inter / union;
-}
-
 export const recommend = onRequest(async (req, res) => {
   try {
-    // Optional: basic CORS for local testing
     res.set("Access-Control-Allow-Origin", "*");
     res.set("Access-Control-Allow-Headers", "Content-Type");
     if (req.method === "OPTIONS") {
       res.status(204).send("");
       return;
     }
-
     if (req.method !== "POST") {
       res.status(405).json({ error: "Use POST" });
       return;
     }
 
-    const body: RecommendRequest = (req.body ?? {}) as RecommendRequest;
+    const body = req.body ?? {};
 
-    const occasion = String(body.occasion ?? "").trim().toLowerCase();
-    const relationship = String(body.relationship ?? "").trim().toLowerCase();
+    // -------------------------
+    // Helpers
+    // -------------------------
+    const norm = (x: any) => String(x ?? "").trim().toLowerCase();
+
+    const normalizeList = (arr: any): string[] => {
+      if (!Array.isArray(arr)) return [];
+      return arr.map((x) => norm(x)).filter(Boolean);
+    };
+
+    // Deterministic tiny tie-breaker (stable per user+gift)
+    const hashStr = (s: string): number => {
+      let h = 0;
+      for (let i = 0; i < s.length; i++) {
+        h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      }
+      return h;
+    };
+
+    const containsAny = (keywords: string[], text: string) => {
+      if (!keywords.length) return false;
+      for (const k of keywords) {
+        if (k && text.includes(k)) return true;
+      }
+      return false;
+    };
+
+    // -------------------------
+    // Request inputs
+    // -------------------------
+    const userId = norm(body.userId);
+
+    const occasion = norm(body.occasion);
+    const relationship = norm(body.relationship);
     const budgetNpr = Number(body.budgetNpr ?? 0);
-    const interests = normalizeList(body.interests);
-    const giftStyle = String(body.giftStyle ?? "").trim().toLowerCase();
-    const limit = Math.min(Number(body.limit ?? 10), 30);
+    const giftStyle = norm(body.giftStyle);
+    const limit = Math.min(Number(body.limit ?? 10), 20);
 
-    if (!occasion || !relationship || !budgetNpr) {
-      res.status(400).json({ error: "Missing occasion/relationship/budgetNpr" });
-      return;
+    const sessionInterests = normalizeList(body.interests);
+
+    // Recipient profile (from PreferencesScreen)
+    const recipientAgeGroup = norm(body.recipientAgeGroup); // teen/young adult/adult/senior
+    const recipientPersonality = norm(body.recipientPersonality); // minimalist/trendy/sentimental
+    const dislikedCategories = normalizeList(body.dislikedCategories);
+
+    // -------------------------
+    // Fetch gifter profile (optional, from ProfileSetup)
+    // -------------------------
+    let profileInterests: string[] = [];
+    let stylePreference = "";
+    let personalityTag = "";
+
+    if (userId) {
+      const userSnap = await db.collection("users").doc(userId).get();
+      const u = userSnap.data() || {};
+      const profile = (u as any).profile || {};
+
+      profileInterests = normalizeList(profile.interests);
+      stylePreference = norm(profile.stylePreference);
+      personalityTag = norm(profile.personalityTag);
     }
 
-    logger.info("Recommend request", { occasion, relationship, budgetNpr, interests, giftStyle, limit });
+    // -------------------------
+    // Merge interests
+    // -------------------------
+    const interestSet = new Set<string>([...profileInterests, ...sessionInterests]);
+    const mergedInterests = Array.from(interestSet);
 
-    // Fetch candidates (keep bounded)
-    const snap = await db.collection("gifts").limit(500).get();
-    const candidates: any[] = [];
-    snap.forEach(doc => candidates.push({ id: doc.id, ...doc.data() }));
+    // -------------------------
+    // Personality keyword mapping
+    // -------------------------
+    const personalityKeywords: Record<string, string[]> = {
+      minimalist: ["minimal", "minimalist", "simple", "clean", "basic", "sleek"],
+      trendy: ["trendy", "fashion", "stylish", "modern", "cool", "aesthetic", "viral"],
+      sentimental: ["sentimental", "memory", "keepsake", "personal", "personalized", "romantic", "heart"],
+    };
 
-    const scored = candidates
-      .filter(item => {
-        const occ = normalizeList(item.occasions);
-        const rel = normalizeList(item.relationships);
-        const minB = Number(item.minBudget ?? 0);
-        const maxB = Number(item.maxBudget ?? Number.MAX_SAFE_INTEGER);
+    const recipientPersonalityKeys = personalityKeywords[recipientPersonality] ?? [];
+    const gifterPersonalityKeys = personalityKeywords[personalityTag] ?? [];
 
-        const occasionOk = occ.length === 0 || occ.includes(occasion);
-        const relationshipOk = rel.length === 0 || rel.includes(relationship);
-        const budgetOk = budgetNpr >= minB && budgetNpr <= maxB;
+    // -------------------------
+    // Load gifts from Firestore
+    // -------------------------
+    const giftsSnap = await db.collection("gifts").get();
+    const gifts = giftsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
 
-        return occasionOk && relationshipOk && budgetOk;
-      })
-      .map(item => {
-        const tags = normalizeList(item.tags);
-        const style = String(item.style ?? "").toLowerCase().trim();
+    // -------------------------
+    // Score gifts
+    // -------------------------
+    const scored = gifts
+      .map((g: any) => {
+        const giftId = String(g.id ?? g._id ?? "").trim() || "unknown";
+        const name = String(g.name ?? g.title ?? giftId);
+        const desc = String(g.description ?? "");
+        const category = norm(g.category ?? g.mainCategory ?? "");
+        const gStyle = norm(g.style);
 
-        const tagScore = jaccard(tags, interests); // 0..1
-        const styleScore = giftStyle && style ? (giftStyle === style ? 1 : 0) : 0;
+        const tags: string[] = normalizeList(g.tags);
 
-        const minB = Number(item.minBudget ?? 0);
-        const maxB = Number(item.maxBudget ?? Number.MAX_SAFE_INTEGER);
-        const center = (minB + maxB) / 2;
-        const budgetDiff = Math.abs(budgetNpr - center);
-        const budgetScore = Math.max(0, 1 - budgetDiff / Math.max(1, center));
+        // Searchable text
+        const textBlob = norm(`${name} ${desc} ${category} ${tags.join(" ")}`);
 
-        const reviewsCount = Number(item.reviewsCount ?? 0);
-        const popularity = Math.min(1, Math.log10(reviewsCount + 1) / 5);
+        // --- Light filters ---
+        const withinBudget =
+          typeof g.minBudget === "number" && typeof g.maxBudget === "number"
+            ? budgetNpr >= g.minBudget && budgetNpr <= g.maxBudget
+            : true;
 
+        const occasionMatch =
+          Array.isArray(g.occasions) && occasion
+            ? normalizeList(g.occasions).includes(occasion)
+            : true;
+
+        const relationshipMatch =
+          Array.isArray(g.relationships) && relationship
+            ? normalizeList(g.relationships).includes(relationship)
+            : true;
+
+        // --- Interest overlap ---
+        const interestHits = mergedInterests.filter((i) => tags.includes(i) || textBlob.includes(i)).length;
+        const interestScore = mergedInterests.length === 0 ? 0 : interestHits / mergedInterests.length;
+
+        // --- Style boosts ---
+        const sessionStyleBoost = giftStyle && gStyle === giftStyle ? 0.15 : 0;
+        const profileStyleBoost = stylePreference && gStyle === stylePreference ? 0.22 : 0;
+
+        // --- Recipient personality boost (strong) ---
+        const recipientPersonalityBoost =
+          recipientPersonality &&
+          (tags.includes(recipientPersonality) || containsAny(recipientPersonalityKeys, textBlob))
+            ? 0.35
+            : 0;
+
+        // --- Gifter personality boost (smaller) ---
+        const gifterPersonalityBoost =
+          personalityTag &&
+          (tags.includes(personalityTag) || containsAny(gifterPersonalityKeys, textBlob))
+            ? 0.12
+            : 0;
+
+        // --- Disliked category penalty (strong) ---
+        const dislikedPenalty =
+          dislikedCategories.length > 0 &&
+          (dislikedCategories.includes(category) || dislikedCategories.some((dc) => textBlob.includes(dc)))
+            ? -0.50
+            : 0;
+
+        // --- Age group boost (optional) ---
+        const ageGroupBoost =
+          recipientAgeGroup && Array.isArray(g.ageGroups)
+            ? (normalizeList(g.ageGroups).includes(recipientAgeGroup) ? 0.12 : 0)
+            : 0;
+
+        // --- Deterministic tiny noise for tie-breaking (stable per user+gift) ---
+        const noiseKey = `${userId || "anon"}|${giftId}`;
+        const deterministicNoise = ((hashStr(noiseKey) % 1000) / 1000) * 0.01;
+
+        // --- Final Score ---
         const score =
-          0.45 * tagScore +
-          0.20 * styleScore +
-          0.25 * budgetScore +
-          0.10 * popularity;
+          (withinBudget ? 0.22 : 0) +
+          (occasionMatch ? 0.14 : 0) +
+          (relationshipMatch ? 0.14 : 0) +
+          (interestScore * 0.60) +
+          sessionStyleBoost +
+          profileStyleBoost +
+          recipientPersonalityBoost +
+          gifterPersonalityBoost +
+          ageGroupBoost +
+          dislikedPenalty +
+          deterministicNoise;
 
-        return {
-          id: String(item.id ?? item.id ?? ""),
-          name: String(item.name ?? item.title ?? ""),
-          score,
-        };
+        return { id: giftId, name, score };
       })
-      .sort((a, b) => b.score - a.score)
+      .filter((x: any) => x.score > 0.10)
+      .sort((a: any, b: any) => b.score - a.score)
       .slice(0, limit);
 
     res.json({
-      model: "Hybrid Context-Aware + Content-Based (server-side)",
+      model: "Hybrid Context + Content + Recipient + User Profile Personalization",
+      userProfileUsed: Boolean(userId),
+      recipientSignalsUsed: Boolean(recipientAgeGroup || recipientPersonality || dislikedCategories.length),
+      mergedInterestsCount: mergedInterests.length,
       count: scored.length,
       results: scored,
     });
   } catch (e: any) {
-    logger.error("Recommend error", e);
+    logger.error("recommend error", e);
     res.status(500).json({ error: String(e?.message ?? e) });
   }
 });
@@ -130,7 +221,6 @@ export const getGiftImage = onRequest(
   { secrets: [UNSPLASH_ACCESS_KEY] },
   async (req, res) => {
     try {
-      // CORS for mobile/web testing
       res.set("Access-Control-Allow-Origin", "*");
       res.set("Access-Control-Allow-Headers", "Content-Type");
       if (req.method === "OPTIONS") {
@@ -151,7 +241,7 @@ export const getGiftImage = onRequest(
         return;
       }
 
-      // 1) Check cache in Firestore
+      // 1) cache
       const ref = db.collection("gifts").doc(giftId);
       const snap = await ref.get();
       if (snap.exists) {
@@ -163,7 +253,7 @@ export const getGiftImage = onRequest(
         }
       }
 
-      // 2) Call Unsplash Search API
+      // 2) Unsplash
       const key = UNSPLASH_ACCESS_KEY.value();
       if (!key) {
         res.status(500).json({ error: "Missing UNSPLASH_ACCESS_KEY secret" });
@@ -198,7 +288,7 @@ export const getGiftImage = onRequest(
         return;
       }
 
-      // 3) Save imageUrl into Firestore (cache)
+      // 3) save cache
       await ref.set(
         {
           imageUrl,

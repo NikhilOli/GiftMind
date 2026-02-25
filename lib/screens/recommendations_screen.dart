@@ -54,6 +54,9 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         interests: input.interests,
         giftStyle: input.giftStyle,
         limit: 10,
+        recipientAgeGroup: input.recipientAgeGroup,
+        recipientPersonality: input.recipientPersonality,
+        dislikedCategories: input.dislikedCategories,
       );
 
       final ids = ranks.map((r) => (r['id'] ?? '').toString()).toList();
@@ -209,10 +212,21 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
             const SizedBox(height: 8),
             Text('Budget: NPR $minB–$maxB  •  Style: $style'),
             const SizedBox(height: 6),
-            Text(
-              'Score (API): ${score == null ? "-" : (score as num).toStringAsFixed(3)}',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
+            if (score != null) ...[
+              const SizedBox(height: 6),
+              Builder(
+                builder: (_) {
+                  final percent = ((score as num) * 100).toStringAsFixed(0);
+                  return Text(
+                    "Match: $percent%",
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: Colors.green,
+                    ),
+                  );
+                },
+              ),
+            ],
           ],
         ),
       ),

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:firebase_auth/firebase_auth.dart';
 
 class RecommendationApi {
   static const String url =
@@ -12,17 +13,24 @@ class RecommendationApi {
     required List<String> interests,
     required String giftStyle,
     int limit = 10,
+    required String recipientAgeGroup,
+    required String recipientPersonality,
+    required List<String> dislikedCategories,
   }) async {
     final resp = await http.post(
       Uri.parse(url),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
+        'userId': FirebaseAuth.instance.currentUser?.uid ?? "",
         'occasion': occasion,
         'relationship': relationship,
         'budgetNpr': budgetNpr,
         'interests': interests,
         'giftStyle': giftStyle,
         'limit': limit,
+        'recipientAgeGroup': recipientAgeGroup,
+        'recipientPersonality': recipientPersonality,
+        'dislikedCategories': dislikedCategories,
       }),
     );
 

@@ -68,6 +68,9 @@ class _GiftDetailsScreenState extends State<GiftDetailsScreen> {
     budgetNpr: _budget.toInt(),
     interests: const [],
     giftStyle: 'Practical',
+    recipientAgeGroup: 'Adult',
+    recipientPersonality: 'Minimalist',
+    dislikedCategories: const [],
   );
 
   Navigator.pushNamed(
